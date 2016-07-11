@@ -3,19 +3,20 @@
 
 $TopicNamesToGetExternalTasksFor = @"
 Get-ADUserSAMAccountNameFromName
+Disable-ADAccount
 "@ -split "`r`n"
-#Disable-ADAccount
 
 $TimeToLockTasksInMS = 1000
 
-$CamundaTopics = foreach ($TopicNameToGetExternalTasksFor in $TopicNamesToGetExternalTasksFor) {
+$CamundaTopics = @()
+$CamundaTopics += foreach ($TopicNameToGetExternalTasksFor in $TopicNamesToGetExternalTasksFor) {
     $PowerShellFunctionName = $TopicNameToGetExternalTasksFor
     Try {
         $PowerShellFunctionParameterNames = get-help $PowerShellFunctionName | 
             select -ExpandProperty parameters | 
             select -ExpandProperty parameter | 
             select -ExpandProperty name
-        New-CamundaTopic -topicName $TopicNameToGetExternalTasksFor -VariableNames $PowerShellFunctionParameterNames -lockDuration $TimeToLockTasksInMS
+        New-CamundaTopic -topicName $TopicNameToGetExternalTasksFor -lockDuration $TimeToLockTasksInMS -VariableNames $PowerShellFunctionParameterNames
     } catch { 
         throw "Couldn't process all the TopicNamesToGetExternalTasksFor, check to make sure they are all valid powershell functions" 
     }
@@ -23,16 +24,6 @@ $CamundaTopics = foreach ($TopicNameToGetExternalTasksFor in $TopicNamesToGetExt
 
 $ExternalServiceTasks = Get-CamundaExternalTasksAndLock -workerID "PowerShell" -maxTasks 100 -topics $CamundaTopics
 
-$FetchAndLockJSONParameters = [pscustomobject][ordered]@{
-    workerId = "PowerShell"
-    maxTasks = 100
-    topics = $CamundaTopics
-} | ConvertTo-Json    
-
-
-$ExternalServiceTasks = Invoke-WebRequest -Uri http://cmagnuson-lt:8080/engine-rest/external-task/fetchAndLock -Method Post -Body $FetchAndLockJSONParameters -Verbose -ContentType "application/json" |
-select -ExpandProperty content |
-ConvertFrom-Json
 
 foreach ($ExternalServiceTask in $ExternalServiceTasks) {
 
