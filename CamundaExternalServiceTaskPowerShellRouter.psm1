@@ -8,66 +8,54 @@ Disable-ADAccount
 
 $TimeToLockTasksInMS = 1000
 
-$CamundaTopics = @()
-$CamundaTopics += foreach ($TopicNameToGetExternalTasksFor in $TopicNamesToGetExternalTasksFor) {
-    $PowerShellFunctionName = $TopicNameToGetExternalTasksFor
-    Try {
-        $PowerShellFunctionParameterNames = get-help $PowerShellFunctionName | 
-            select -ExpandProperty parameters | 
-            select -ExpandProperty parameter | 
-            select -ExpandProperty name
-        New-CamundaTopic -topicName $TopicNameToGetExternalTasksFor -lockDuration $TimeToLockTasksInMS -VariableNames $PowerShellFunctionParameterNames
-    } catch { 
-        throw "Couldn't process all the TopicNamesToGetExternalTasksFor, check to make sure they are all valid powershell functions" 
-    }
-}
-
-$ExternalServiceTasks = Get-CamundaExternalTasksAndLock -workerID "PowerShell" -maxTasks 100 -topics $CamundaTopics
-
-
-foreach ($ExternalServiceTask in $ExternalServiceTasks) {
-
-    $PowerShellFunctionName = $ExternalServiceTask.topicName
-    
-    $PowerShellFunctionParameterNames = get-help $PowerShellFunctionName | 
-    select -ExpandProperty parameters | 
-    select -ExpandProperty parameter | 
-    select -ExpandProperty name
-    
-    $ExternalTaskVariables = $ExternalServiceTask.variables | 
-    Get-Member -MemberType NoteProperty | 
-    select Name, @{
-        Name = "Value"
-        Expression = {$ExternalServiceTask.variables."$($_.Name)".value}
+function Invoke-CamundaExternalServiceTaskPowerShellRouting {
+    $CamundaTopics = @()
+    $CamundaTopics += foreach ($TopicNameToGetExternalTasksFor in $TopicNamesToGetExternalTasksFor) {
+        $PowerShellFunctionName = $TopicNameToGetExternalTasksFor
+        Try {
+            $PowerShellFunctionParameterNames = get-help $PowerShellFunctionName | 
+                select -ExpandProperty parameters | 
+                select -ExpandProperty parameter | 
+                select -ExpandProperty name
+            New-CamundaTopic -topicName $TopicNameToGetExternalTasksFor -lockDuration $TimeToLockTasksInMS -VariableNames $PowerShellFunctionParameterNames
+        } catch { 
+            throw "Couldn't process all the TopicNamesToGetExternalTasksFor, check to make sure they are all valid powershell functions" 
+        }
     }
 
-    $ExternalTaskVariablesThatMatchPowerShellFunctionParameters = $ExternalTaskVariables |
-    Where Name -in $PowerShellFunctionParameterNames
+    $ExternalServiceTasks = Get-CamundaExternalTasksAndLock -workerID "PowerShell" -maxTasks 100 -topics $CamundaTopics
 
-    $PowerShellFunctionParameters = foreach ($Variable in $ExternalTaskVariablesThatMatchPowerShellFunctionParameters) {
-        "-" + $Variable.Name + ' "' + $Variable.value + '"' 
-    }
+    foreach ($ExternalServiceTask in $ExternalServiceTasks) {
 
-    $PowerShellCommand = $PowerShellFunctionName + " " + $PowerShellFunctionParameters -join " "
-    $PowerShellResult = Invoke-Expression $PowerShellCommand
-
-    $CompleteTaskJSONParameters = [pscustomobject][ordered]@{
-        workerId = "PowerShell"
-        variables = [pscustomobject][ordered]@{
-            Response = [pscustomobject][ordered]@{ 
-                value = $PowerShellResult 
+        $PowerShellFunctionName = $ExternalServiceTask.topicName
+        
+        $ExternalTaskVariables = foreach ($Property in $ExternalServiceTask.variables.psobject.Properties) {
+            [pscustomobject]@{
+                Name = $Property.Name 
+                Value = $Property.value.value
             }
-        }        
-    } | ConvertTo-Json
+        }
 
+        $PowerShellFunctionParameters = foreach ($Variable in $ExternalTaskVariables) {
+            "-" + $Variable.Name + ' "' + $Variable.value + '"' 
+        }
 
-    $TaskCompleteResponse = Invoke-WebRequest -Uri "http://cmagnuson-lt:8080/engine-rest/external-task/$($ExternalServiceTask.id)/complete" -Method Post -Body $CompleteTaskJSONParameters -Verbose -ContentType "application/json"
+        $PowerShellCommand = $PowerShellFunctionName + " " + $PowerShellFunctionParameters -join " "
+        $PowerShellResult = Invoke-Expression $PowerShellCommand
     
+        $Variables = @{}
+        $Variables += New-CamundaVariable -Name "Response" -Value $PowerShellResult | ConvertTo-HashTable
 
-
-
-
+        Complete-CamundaExternalTask -ExternalTaskID $ExternalServiceTask.id -WorkerID "PowerShell" -Variables $Variables
+    }
 }
 
-
-Invoke-WebRequest -Uri http://cmagnuson-lt:8080/engine-rest/external-task/count -Method Post <#-Credential (Get-Credential)#> -ContentType "application/json" -Body '{"topicName":"Get-ADUserSAMAccountNameFromName"}'
+function ConvertTo-HashTable {
+    #Inspired by http://stackoverflow.com/questions/3740128/pscustomobject-to-hashtable
+    param(
+        [Parameter(ValueFromPipeline)]$Object
+    )
+    $HashTable = @{}
+    $Object.psobject.properties | Foreach { $HashTable[$_.Name] = $_.Value }
+    $HashTable
+}
