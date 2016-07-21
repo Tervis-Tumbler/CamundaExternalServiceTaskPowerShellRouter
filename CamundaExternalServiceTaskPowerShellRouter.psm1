@@ -4,6 +4,7 @@
 $TopicNamesToGetExternalTasksFor = @"
 Get-BPMNADUserSAMAccountNameFromName
 Disable-ADAccount
+Get-BPMNEmployeeOnlyInMES
 "@ -split "`r`n"
 
 $TimeToLockTasksInMS = 1000
@@ -19,7 +20,7 @@ function Install-CamundaExternalServiceTaskPowerShellRouter {
 
 @"
 Invoke-CamundaExternalServiceTaskPowerShellRouting
-"@ | Out-File "$PathToScriptForScheduledTask\Invoke-CamundaExternalServiceTaskPowerShellRouting.ps1"
+"@ | Out-File "$PathToScriptForScheduledTask\Invoke-CamundaExternalServiceTaskPowerShellRouting.ps1" -Force
 
 
     $ScriptFilePath = "$PathToScriptForScheduledTask\Invoke-CamundaExternalServiceTaskPowerShellRouting.ps1"
