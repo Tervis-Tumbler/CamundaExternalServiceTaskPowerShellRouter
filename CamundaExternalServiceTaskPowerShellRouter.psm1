@@ -5,7 +5,9 @@ $TopicNamesToGetExternalTasksFor = @"
 Get-BPMNADUserSAMAccountNameFromName
 Disable-ADAccount
 Get-BPMNEmployeeOnlyInMES
+Get-ADUser
 "@ -split "`r`n"
+#Get-ManagerSamAccountNameFromEmployeeSamAccountName
 
 $TimeToLockTasksInMS = 1000
 
@@ -68,34 +70,28 @@ function Invoke-CamundaExternalServiceTaskPowerShellRouting {
 
         $PowerShellFunctionName = $ExternalServiceTask.topicName
         
-        $ExternalTaskVariables = foreach ($Property in $ExternalServiceTask.variables.psobject.Properties) {
-            [pscustomobject]@{
-                Name = $Property.Name 
-                Value = $Property.value.value
+        $PowerShellFunctionParameters = @{}
+        foreach ($Property in $ExternalServiceTask.variables.psobject.Properties) {
+            $PowerShellFunctionParameters += @{
+                $Property.Name = if($Property.value.type -eq "Object") {
+                    $Property.value.value | ConvertFrom-Json
+                } else {
+                    $Property.value.value
+                }
             }
         }
 
-        $PowerShellFunctionParameters = foreach ($Variable in $ExternalTaskVariables) {
-            "-" + $Variable.Name + ' "' + $Variable.value + '"' 
-        }
-
-        $PowerShellCommand = $PowerShellFunctionName + " " + $PowerShellFunctionParameters -join " "
         $Variables = @{}
 
         try {
-            $PowerShellResult = Invoke-Expression $PowerShellCommand
-            $Variables += $PowerShellResult | ConvertTo-CamundaVariable | ConvertTo-HashTable
+            $PowerShellResult = &$PowerShellFunctionName @PowerShellFunctionParameters
+            $CamundaVariables = $PowerShellResult | ConvertTo-CamundaVariable
+            $CamundaVariables | % { $Variables += $(ConvertTo-HashTable -Object $_) }
             Complete-CamundaExternalTask -ExternalTaskID $ExternalServiceTask.id -WorkerID "PowerShell" -Variables $Variables
         } catch {
             $ExceptionString = $_.Exception.Message
             Invoke-CamundaExternalTaskFailure -ExternalTaskID $ExternalServiceTask.id -WorkerID "PowerShell" -ErrorMessage $_.Exception.Message
         }
-    
-        #$Variables += New-CamundaVariable -Name "Response" -Value $PowerShellResult | ConvertTo-HashTable
-        
-
-        #$PowerShellResult | ConvertTo-CamundaVariable
-
     }
 }
 
