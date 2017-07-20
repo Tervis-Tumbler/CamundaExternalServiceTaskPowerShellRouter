@@ -160,13 +160,3 @@ function ConvertTo-CamundaVariable {
         }
     }
 }
-
-function ConvertTo-HashTable {
-    #Inspired by http://stackoverflow.com/questions/3740128/pscustomobject-to-hashtable
-    param(
-        [Parameter(ValueFromPipeline)]$Object
-    )
-    $HashTable = @{}
-    $Object.psobject.properties | Foreach { $HashTable[$_.Name] = $_.Value }
-    $HashTable
-}
